@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -15,16 +16,20 @@ import (
 	jwt "github.com/dgrijalva/jwt-go"
 )
 
-var signingKey = []byte("murdershewrote")
-
 var (
 	verificationKey *rsa.PublicKey
-	privateKey      *rsa.PrivateKey
+	signingKey      *rsa.PrivateKey
 )
 
 // AuthToken returned when user is authenticated
 type AuthToken struct {
 	Token string `json:"token"`
+}
+
+// MyClaims structure for the data in the JWT token
+type MyClaims struct {
+	Name string `json:"name"`
+	jwt.StandardClaims
 }
 
 func init() {
@@ -42,7 +47,7 @@ func init() {
 		log.Fatal(err.Error())
 	}
 
-	privateKey, err = jwt.ParseRSAPrivateKeyFromPEM(privateKeyFile)
+	signingKey, err = jwt.ParseRSAPrivateKeyFromPEM(privateKeyFile)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -58,14 +63,12 @@ func validateUser(user User) (string, error) {
 		authTime = 360 // six hours
 	}
 
-	fmt.Println(privateKey)
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"name":     strings.Join([]string{authUser.Firstname, authUser.Lastname}, " "),
-		"username": authUser.Username,
-		"id":       authUser.ID,
-		"exp":      time.Now().Add(time.Minute * authTime).Unix(),
-		"iat":      time.Now().Unix(),
+	token := jwt.NewWithClaims(jwt.GetSigningMethod("RS256"), jwt.MapClaims{
+		"name": strings.Join([]string{authUser.Firstname, authUser.Lastname}, " "),
+		"sub":  authUser.Username,
+		"id":   authUser.ID,
+		"exp":  time.Now().Add(time.Minute * authTime).Unix(),
+		"iat":  time.Now().Unix(),
 	})
 
 	tokenString, err := token.SignedString(signingKey)
@@ -101,13 +104,22 @@ func isAuthorized(token string) error {
 		jwtString = strings.Split(token, " ")[1]
 	}
 
-	verifyKey, err := jwt.Parse(jwtString, func(token *jwt.Token) (interface{}, error) {
+	verifyKey, err := jwt.ParseWithClaims(jwtString, &MyClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != "RS256" {
+			return nil, errors.New("Unsupported signing key")
+		}
+
 		return verificationKey, nil
 	})
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	fmt.Println(verifyKey)
+
+	if claims, ok := verifyKey.Claims.(*MyClaims); ok && verifyKey.Valid {
+		fmt.Printf("%v %v", claims.Name, claims.StandardClaims.Subject)
+	} else {
+		return err
+	}
 
 	return nil
 }
@@ -136,9 +148,9 @@ func getUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	// if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
-	// 	log.Fatal(err)
-	// }
+	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
+		log.Fatal(err)
+	}
 	systemUsers := getUsersList()
 	json.NewEncoder(w).Encode(systemUsers)
 }
