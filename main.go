@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,7 +117,8 @@ func isAuthorized(token string) error {
 	}
 
 	if claims, ok := verifyKey.Claims.(*MyClaims); ok && verifyKey.Valid {
-		fmt.Printf("%v %v", claims.Name, claims.StandardClaims.Subject)
+		expTime, _ := time.Parse(time.RFC3339, strconv.FormatInt(claims.StandardClaims.ExpiresAt, 10))
+		fmt.Printf("Token issued for %v %v", claims.Name, expTime)
 	} else {
 		return err
 	}
@@ -171,7 +173,7 @@ func main() {
 	route.HandleFunc("/user", deleteUserHandler).Methods("DELETE")
 	route.HandleFunc("/user/login", authUserHandler).Methods("POST")
 
-	if err := http.ListenAndServe(":8080", route); err != nil {
+	if err := http.ListenAndServe(":5000", route); err != nil {
 		log.Fatal(err)
 	}
 }
