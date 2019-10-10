@@ -145,7 +145,7 @@ func deleteUser(user User) {
 }
 
 func authUser(user User) (User, error) {
-	var err error = nil
+	var err error
 	database := openDatabase()
 	defer database.Close()
 
