@@ -57,9 +57,8 @@ func init() {
 func validateUser(user User) (string, error) {
 	authUser, err := authUser(user)
 	var authTime time.Duration
-
 	if err != nil {
-		authTime = -1
+		authTime = -5
 	} else {
 		authTime = 360 // six hours
 	}
