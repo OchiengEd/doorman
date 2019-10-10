@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -145,7 +146,6 @@ func deleteUser(user User) {
 }
 
 func authUser(user User) (User, error) {
-	var err error
 	database := openDatabase()
 	defer database.Close()
 
@@ -163,11 +163,14 @@ func authUser(user User) (User, error) {
 		}
 	} // end for
 
-	if authUser.Username == "" {
-		authUser.Username = "unauthorized"
-		authUser.Firstname = "Anonymous"
-		err = errors.New("error: User not found")
+	if reflect.DeepEqual(authUser, User{}) {
+		return authUser, errors.New("You entered wrong username or password")
 	}
+	// if authUser.Username == "" {
+	// 	authUser.Username = "unauthorized"
+	// 	authUser.Firstname = "Anonymous"
+	// 	err = errors.New("error: User not found")
+	// }
 
-	return authUser, err
+	return authUser, nil
 }
