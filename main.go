@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	jwt "github.com/dgrijalva/jwt-go"
 )
@@ -47,11 +49,12 @@ func init() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-
 	signingKey, err = jwt.ParseRSAPrivateKeyFromPEM(privateKeyFile)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+
+	fmt.Println("RSA public/private keys loaded")
 }
 
 func validateUser(user User) (string, error) {
@@ -59,23 +62,31 @@ func validateUser(user User) (string, error) {
 	var authTime time.Duration
 	if err != nil {
 		authTime = -5
+		failedLogins.Inc()
 	} else {
-		authTime = 360 // six hours
+		authTime = 120 // two hours
 	}
 
 	token := jwt.NewWithClaims(jwt.GetSigningMethod("RS256"), jwt.MapClaims{
-		"name": strings.Join([]string{authUser.Firstname, authUser.Lastname}, " "),
-		"sub":  authUser.Username,
-		"id":   authUser.ID,
-		"exp":  time.Now().Add(time.Minute * authTime).Unix(),
-		"iat":  time.Now().Unix(),
+		"sub": authUser.Firstname,
+		"id":  authUser.ID,
+		"exp": time.Now().Add(time.Minute * authTime).Unix(),
+		"iat": time.Now().Unix(),
 	})
 
 	tokenString, err := token.SignedString(signingKey)
+
+	// Set error if user is blank
+	if authUser.ID == "" {
+		err = errors.New("User not found")
+	}
+
 	return tokenString, err
 }
 
 func authUserHandler(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	code := http.StatusOK
 	w.Header().Set("Content-Type", "application/json")
 	var user User
 	json.NewDecoder(r.Body).Decode(&user)
@@ -90,16 +101,23 @@ func authUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	jwtToken, err := validateUser(user)
 	if err != nil {
-		log.Fatal(err)
+		w.WriteHeader(http.StatusUnauthorized)
+		code = http.StatusUnauthorized
 	}
 
 	authToken := AuthToken{Token: jwtToken}
+	duration := time.Since(startTime).Seconds()
+	loginRate.WithLabelValues(fmt.Sprintf("%d", code)).Observe(duration)
 
 	json.NewEncoder(w).Encode(authToken)
 }
 
 func isAuthorized(token string) error {
 	var jwtString string
+	if token == "" {
+		return errors.New("This is a protected resource")
+	}
+
 	if len(strings.Split(token, " ")) == 2 {
 		jwtString = strings.Split(token, " ")[1]
 	}
@@ -117,7 +135,7 @@ func isAuthorized(token string) error {
 
 	if claims, ok := verifyKey.Claims.(*MyClaims); ok && verifyKey.Valid {
 		expTime, _ := time.Parse(time.RFC3339, strconv.FormatInt(claims.StandardClaims.ExpiresAt, 10))
-		fmt.Printf("Token issued for %v %v", claims.Name, expTime)
+		fmt.Printf("Token will expire at %v", expTime)
 	} else {
 		return err
 	}
@@ -150,7 +168,8 @@ func getUserHandler(w http.ResponseWriter, r *http.Request) {
 func listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
-		log.Fatal(err)
+		w.WriteHeader(http.StatusForbidden)
+		return
 	}
 	systemUsers := getUsersList()
 	json.NewEncoder(w).Encode(systemUsers)
@@ -164,7 +183,10 @@ func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	prometheus.Register(loginRate)
+
 	route := mux.NewRouter()
+	route.Handle("/metrics", promhttp.Handler())
 	route.HandleFunc("/user/register", createUserHandler).Methods("POST")
 	route.HandleFunc("/user/{id}", getUserHandler).Methods("GET", "HEAD")
 	route.HandleFunc("/users/list", listUsersHandler).Methods("GET", "HEAD")
