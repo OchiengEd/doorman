@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // User is a type that represents users of the system
@@ -49,12 +51,21 @@ func openDatabase() *sql.DB {
 	return db
 }
 
+func scramblePassword(password string) string {
+	hashedPasswd, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(hashedPasswd)
+}
+
 func createUser(user User) {
 	database := openDatabase()
 	defer database.Close()
 
 	user.CreatedAt = currentTimeUTC()
 	user.ID = newUserID()
+	user.Password = scramblePassword(user.Password)
 
 	createQuery := "INSERT INTO user(id, created_at, firstname, lastname, username, password) VALUES (?, ?, ?, ?, ?, ?)"
 	insert, err := database.Query(createQuery, &user.ID, &user.CreatedAt, &user.Firstname, &user.Lastname, &user.Username, &user.Password)
@@ -145,12 +156,11 @@ func deleteUser(user User) {
 }
 
 func authUser(user User) (User, error) {
-	var err error
 	database := openDatabase()
 	defer database.Close()
 
-	authQuery := "SELECT created_at, id, firstname, lastname, username FROM user WHERE username = ? AND password = ? AND deleted_at is NULL"
-	rows, err := database.Query(authQuery, &user.Username, &user.Password)
+	authQuery := "SELECT created_at, id, firstname, lastname, username, password FROM user WHERE username = ? AND deleted_at is NULL"
+	rows, err := database.Query(authQuery, &user.Username)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -158,16 +168,23 @@ func authUser(user User) (User, error) {
 
 	var authUser User
 	for rows.Next() {
-		if err := rows.Scan(&authUser.CreatedAt, &authUser.ID, &authUser.Firstname, &authUser.Lastname, &authUser.Username); err != nil {
+		if err := rows.Scan(&authUser.CreatedAt, &authUser.ID, &authUser.Firstname, &authUser.Lastname, &authUser.Username, &authUser.Password); err != nil {
 			log.Fatal(err)
 		}
 	} // end for
 
-	if authUser.Username == "" {
-		authUser.Username = "unauthorized"
-		authUser.Firstname = "Anonymous"
-		err = errors.New("error: User not found")
+	if reflect.DeepEqual(authUser, User{}) {
+		return authUser, errors.New("Verify credentials and try again")
 	}
 
-	return authUser, err
+	// Check is password is correct
+	// Send empty user struct if password is wrong
+	if err := bcrypt.CompareHashAndPassword([]byte(authUser.Password), []byte(user.Password)); err != nil {
+		return User{}, errors.New("You entered a wrong username or password")
+	}
+
+	// Remove password from struct so that it is not included in Claims
+	authUser.Password = ""
+
+	return authUser, nil
 }
