@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -134,8 +133,8 @@ func isAuthorized(token string) error {
 	}
 
 	if claims, ok := verifyKey.Claims.(*MyClaims); ok && verifyKey.Valid {
-		expTime, _ := time.Parse(time.RFC3339, strconv.FormatInt(claims.StandardClaims.ExpiresAt, 10))
-		fmt.Printf("Token will expire at %v", expTime)
+		expTime := time.Unix(claims.StandardClaims.ExpiresAt, 0).UTC()
+		log.Printf("Token will expire at %v", expTime)
 	} else {
 		return err
 	}
@@ -145,6 +144,10 @@ func isAuthorized(token string) error {
 
 func createUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	var user User
 	json.NewDecoder(r.Body).Decode(&user)
 
@@ -153,13 +156,25 @@ func createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
 	var updatedUser User
 	json.NewDecoder(r.Body).Decode(&updatedUser)
-
+	if updatedUser.Password != "" {
+		updatedUser.Password = scramblePassword(updatedUser.Password)
+	}
 }
 
 func getUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
 	params := mux.Vars(r)
 	targetUser := getUser(params["id"])
 	json.NewEncoder(w).Encode(targetUser)
@@ -177,6 +192,11 @@ func listUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if err := isAuthorized(r.Header.Get("Authorization")); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
 	var targetUser User
 	json.NewDecoder(r.Body).Decode(&targetUser)
 	deleteUser(targetUser)
