@@ -25,12 +25,13 @@ type User struct {
 	Password  string `json:"password,omitempty"`
 }
 
-var (
-	databaseUsername = os.Getenv("DATABASE_USERNAME")
-	databasePasswd   = os.Getenv("DATABASE_PASSWORD")
-	databaseHost     = os.Getenv("DATABASE_HOST")
-	databaseName     = os.Getenv("DATABASE")
-)
+// Credentials for database
+type Credentials struct {
+	Username string
+	Password string
+	Database string
+	Hostname string
+}
 
 func currentTimeUTC() string {
 	currTime := time.Now().UTC()
@@ -42,8 +43,15 @@ func newUserID() string {
 }
 
 func openDatabase() *sql.DB {
+	cred := Credentials{
+		Username: os.Getenv("DATABASE_USERNAME"),
+		Password: os.Getenv("DATABASE_PASSWORD"),
+		Database: os.Getenv("DATABASE"),
+		Hostname: os.Getenv("DATABASE_HOST"),
+	}
+
 	connectionString := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s",
-		databaseUsername, databasePasswd, databaseHost, databaseName)
+		cred.Username, cred.Password, cred.Hostname, cred.Database)
 	db, err := sql.Open("mysql", connectionString)
 	if err != nil {
 		panic(err)
